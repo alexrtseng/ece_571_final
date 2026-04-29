@@ -1,0 +1,41 @@
+# Small/debug config — ~2-5 min on Mac MPS.
+# Produces real checkpoints + all outputs so every downstream script
+# (sample.py, evaluate.py, battery.py, notebook) can be exercised.
+#
+# Usage:
+#   python train.py --config configs/small.yaml
+
+# ── Data ──────────────────────────────────────────────────────────────────────
+pnode_id: 48806
+data_dir: ./data
+raw_da_dir: ./pjm_lmps_da
+raw_rt_dir: ./pjm_lmps
+
+# ── Train/val/test split ──────────────────────────────────────────────────────
+train_end: "2023-12"
+val_end: "2024-12"
+
+# ── Model — shrunken for speed ─────────────────────────────────────────────────
+base_channels: 16        # vs 64 in default (~16x fewer params)
+num_res_blocks: 1        # vs 2
+attn_heads: 4            # vs 8
+
+# ── Diffusion — shorter chain ──────────────────────────────────────────────────
+T: 200                   # vs 1000 (shorter forward/reverse chain)
+schedule: cosine
+ddim_steps: 10           # vs 50
+
+# ── Training ──────────────────────────────────────────────────────────────────
+epochs: 30               # vs 300
+batch_size: 64
+lr: 1.0e-4
+lr_warmup_steps: 50      # vs 500
+grad_clip: 1.0
+mixed_precision: true    # no-op on MPS, active on CUDA
+
+# ── Calendar conditioning ──────────────────────────────────────────────────────
+use_calendar: false
+
+# ── Output ────────────────────────────────────────────────────────────────────
+out_dir: ./runs/small
+save_every: 5

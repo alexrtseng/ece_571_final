@@ -1,0 +1,42 @@
+# Calendar-conditioned model — inherits everything from default.yaml
+# except these overrides. Run as:
+#   python train.py --config configs/calendar.yaml
+#
+# Loads default.yaml first, then applies overrides below.
+# (train.py reads only this file, so we duplicate the full config here.)
+
+# ── Data ──────────────────────────────────────────────────────────────────────
+pnode_id: 48806
+data_dir: ./data
+raw_da_dir: ./pjm_lmps_da
+raw_rt_dir: ./pjm_lmps
+
+# ── Train/val/test split ──────────────────────────────────────────────────────
+train_end: "2023-12"
+val_end: "2024-12"
+
+# ── Model ─────────────────────────────────────────────────────────────────────
+base_channels: 64
+num_res_blocks: 2
+attn_heads: 8
+
+# ── Diffusion ─────────────────────────────────────────────────────────────────
+T: 1000
+schedule: cosine
+ddim_steps: 50
+
+# ── Training ──────────────────────────────────────────────────────────────────
+epochs: 300
+batch_size: 64
+lr: 1.0e-4
+lr_warmup_steps: 500
+grad_clip: 1.0
+mixed_precision: true
+patience: 40
+
+# ── Calendar conditioning ──────────────────────────────────────────────────────
+use_calendar: true
+
+# ── Output ────────────────────────────────────────────────────────────────────
+out_dir: ./runs/calendar
+save_every: 10

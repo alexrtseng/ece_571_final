@@ -1,0 +1,36 @@
+# ── Data ──────────────────────────────────────────────────────────────────────
+pnode_id: 48806
+data_dir: ./data
+raw_da_dir: ./pjm_lmps_da
+raw_rt_dir: ./pjm_lmps
+
+# ── Train/val/test split (inclusive, YYYY-MM) ─────────────────────────────────
+train_end: "2023-12"
+val_end: "2024-12"
+# test = everything after val_end
+
+# ── Model ─────────────────────────────────────────────────────────────────────
+base_channels: 64      # U-Net base channel width; doubled at each stage
+num_res_blocks: 2      # ResBlocks per encoder/decoder stage
+attn_heads: 8
+
+# ── Diffusion ─────────────────────────────────────────────────────────────────
+T: 1000                # total diffusion timesteps (DDPM)
+schedule: cosine       # cosine | linear
+ddim_steps: 50         # timesteps used when sampling with DDIM
+
+# ── Training ──────────────────────────────────────────────────────────────────
+epochs: 300
+batch_size: 64
+lr: 1.0e-4
+lr_warmup_steps: 500
+grad_clip: 1.0
+mixed_precision: true
+patience: 40
+
+# ── Calendar conditioning ──────────────────────────────────────────────────────
+use_calendar: false    # set true in configs/calendar.yaml to enable
+
+# ── Output ────────────────────────────────────────────────────────────────────
+out_dir: ./runs
+save_every: 10         # save checkpoint every N epochs

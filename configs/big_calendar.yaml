@@ -1,0 +1,61 @@
+# Multi-node + calendar conditioning config.
+# Combines the 15-node dataset from big.yaml with the calendar features
+# from calendar.yaml. Uses the same preprocessed data as big.yaml
+# (calendar features are always saved regardless of use_calendar).
+#
+# Preprocess (only needed once — same data as big.yaml):
+#   python data/preprocess.py --config configs/big.yaml
+# Then train:
+#   python train.py --config configs/big_calendar.yaml
+
+# ── Data ──────────────────────────────────────────────────────────────────────
+pnode_ids:
+  - 48806        # MERCER 230 KV #1 SP         (Pennsylvania)
+  - 98370003     # 02HAMILT138 KV LD1           (Ohio)
+  - 49052        # LEWESREA 69 KV LEWES         (Delaware)
+  - 106856905    # DEPTFORD 230 KV DEPTFDSP     (New Jersey)
+  - 93353977     # NEWARK 4 KV NEWAR2SP         (Ohio)
+  - 32411433     # GREENBRI 138 KV T1           (West Virginia)
+  - 1123180719   # LAURELDM 13.8 KV LAUREL      (Maryland)
+  - 1305131573   # CLINTONC 138 KV CLNTONBS     (Ohio)
+  - 1338424127   # SHARON 69 KV T1 LD           (Pennsylvania)
+  - 1356152712   # BLUFFTON 69 KV BLFTN         (Ohio)
+  - 1356155763   # PAINESV2 138 KV TR10         (Ohio)
+  - 1439644392   # BALLSGAP 138 KV T1           (Virginia)
+  - 1666104437   # AUGLAIZE 69 KV T1            (Ohio)
+  - 1666104441   # NCOLUMBG 69 KV COLUMBUS      (Ohio)
+  - 2155501828   # MILTON 69 KV LEW2LOAD        (Delaware)
+
+data_dir: ./data/big
+raw_da_dir: ./pjm_lmps_da
+raw_rt_dir: ./pjm_lmps
+
+# ── Train/val/test split ──────────────────────────────────────────────────────
+train_end: "2023-12"
+val_end: "2024-12"
+
+# ── Model ─────────────────────────────────────────────────────────────────────
+base_channels: 64
+num_res_blocks: 2
+attn_heads: 8
+
+# ── Diffusion ─────────────────────────────────────────────────────────────────
+T: 1000
+schedule: cosine
+ddim_steps: 50
+
+# ── Training ──────────────────────────────────────────────────────────────────
+epochs: 300
+batch_size: 64
+lr: 1.0e-4
+lr_warmup_steps: 500
+grad_clip: 1.0
+mixed_precision: true
+patience: 20
+
+# ── Calendar conditioning ──────────────────────────────────────────────────────
+use_calendar: true
+
+# ── Output ────────────────────────────────────────────────────────────────────
+out_dir: ./runs/big_calendar
+save_every: 10
