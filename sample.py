@@ -87,27 +87,53 @@ def main():
     # ── All-test-day batch mode ────────────────────────────────────────────────
     if args.all_test:
         test_data = np.load(os.path.join(cfg["data_dir"], "test.npz"), allow_pickle=True)
-        n_days = len(test_data["da"])
         sampler_name = "ddim" if args.ddim else "ddpm"
         S = args.ddim_steps or cfg.get("ddim_steps", 50)
+
+        # Filter test rows to only the node(s) this model was trained on.
+        sc_data = np.load(os.path.join(cfg["data_dir"], "scaler.npz"))
+        trained_pnodes = sc_data["pnode_ids"].tolist() if "pnode_ids" in sc_data.files else None
+        test_node_ids = test_data["node_ids"] if "node_ids" in test_data.files else None
+
+        if test_node_ids is not None and trained_pnodes is not None:
+            mask = np.isin(test_node_ids, trained_pnodes)
+            da_arr    = test_data["da"][mask]
+            rt_arr    = test_data["rt"][mask]
+            cal_arr   = test_data["calendar"][mask] if "calendar" in test_data.files else np.zeros((mask.sum(), 4), dtype=np.int64)
+            dates_arr = test_data["dates"][mask]
+            nid_arr   = test_node_ids[mask]
+            if len(trained_pnodes) == 1:
+                print(f"Single-node model (pnode {trained_pnodes[0]}): "
+                      f"using {mask.sum()} matching test rows.")
+            else:
+                print(f"Multi-node model ({len(trained_pnodes)} nodes): "
+                      f"using {mask.sum()} test rows.")
+        else:
+            da_arr    = test_data["da"]
+            rt_arr    = test_data["rt"]
+            cal_arr   = test_data["calendar"] if "calendar" in test_data.files else np.zeros((len(test_data["da"]), 4), dtype=np.int64)
+            dates_arr = test_data["dates"]
+            nid_arr   = test_node_ids if test_node_ids is not None else np.zeros(len(da_arr), dtype=np.int64)
+
+        n_days = len(da_arr)
         all_samples, all_real = [], []
 
         print(f"Sampling {args.n_samples} trace(s) for each of {n_days} test days "
               f"with {sampler_name.upper()}...")
 
         for i in range(n_days):
-            da_288 = np.repeat(test_data["da"][i], 12).astype(np.float32)
+            da_288 = np.repeat(da_arr[i], 12).astype(np.float32)
             da_c = torch.from_numpy(da_288).unsqueeze(0).unsqueeze(0).to(device)
             cal_t = None
-            if use_calendar and "calendar" in test_data:
-                cal_feat = test_data["calendar"][i].astype(np.int64)
+            if use_calendar:
+                cal_feat = cal_arr[i].astype(np.int64)
                 cal_t = torch.from_numpy(cal_feat).unsqueeze(0).to(device)
             if args.ddim:
                 s = sample_ddim(model, schedule, da_c, n_samples=args.n_samples, S=S, cal=cal_t)
             else:
                 s = sample_ddpm(model, schedule, da_c, n_samples=args.n_samples, cal=cal_t)
             all_samples.append(s.squeeze(1).cpu().numpy())
-            all_real.append(denormalize(test_data["rt"][i], scaler_mean, scaler_std))
+            all_real.append(denormalize(rt_arr[i], scaler_mean, scaler_std))
 
         samples_norm_all = np.concatenate(all_samples, axis=0)           # (N_days*n_samples, 288)
         samples_all = denormalize(samples_norm_all, scaler_mean, scaler_std)
@@ -115,7 +141,8 @@ def main():
 
         out_path = args.out or os.path.join(cfg["out_dir"], f"samples_{sampler_name}.npz")
         os.makedirs(os.path.dirname(out_path) if os.path.dirname(out_path) else ".", exist_ok=True)
-        np.savez(out_path, samples=samples_all, real_rt=real_all, dates=test_data["dates"])
+        np.savez(out_path, samples=samples_all, real_rt=real_all,
+                 dates=dates_arr, node_ids=nid_arr)
         print(f"Saved {samples_all.shape} samples ({n_days} days × {args.n_samples}) to {out_path}")
         return
 

@@ -44,40 +44,52 @@ class _Tee:
 
 # ── Data loading ───────────────────────────────────────────────────────────────
 
-def load_date_range(data_dir: str, start_date: str, end_date: str) -> dict:
+def load_date_range(data_dir: str, start_date: str, end_date: str,
+                    pnode_id: int | None = None) -> dict:
     """
     Return normalized DA/RT/calendar arrays for all days in [start_date, end_date].
     Searches train, val, and test splits and merges chronologically.
+    If pnode_id is given, only rows for that node are returned.
     """
     d0 = datetime.date.fromisoformat(start_date)
     d1 = datetime.date.fromisoformat(end_date)
 
-    collected = {k: [] for k in ("dates", "da", "rt", "calendar")}
+    collected = {k: [] for k in ("dates", "da", "rt", "calendar", "node_ids")}
     for split in ("train", "val", "test"):
         path = os.path.join(data_dir, f"{split}.npz")
         if not os.path.exists(path):
             continue
         data = np.load(path, allow_pickle=True)
         dates = data["dates"]
+        node_ids = data["node_ids"] if "node_ids" in data.files else None
+
         mask = np.array([d0 <= d <= d1 for d in dates])
+        if pnode_id is not None and node_ids is not None:
+            mask &= (node_ids == pnode_id)
         if not mask.any():
             continue
         collected["dates"].append(dates[mask])
         collected["da"].append(data["da"][mask])
         collected["rt"].append(data["rt"][mask])
-        if "calendar" in data:
-            collected["calendar"].append(data["calendar"][mask])
-        else:
-            collected["calendar"].append(np.zeros((mask.sum(), 4), dtype=np.int8))
+        collected["calendar"].append(
+            data["calendar"][mask] if "calendar" in data.files
+            else np.zeros((mask.sum(), 4), dtype=np.int8)
+        )
+        collected["node_ids"].append(
+            node_ids[mask] if node_ids is not None
+            else np.zeros(mask.sum(), dtype=np.int64)
+        )
 
     if not collected["dates"]:
-        raise ValueError(f"No data found for range {start_date} → {end_date}")
+        node_str = f" for pnode {pnode_id}" if pnode_id is not None else ""
+        raise ValueError(f"No data found for range {start_date} → {end_date}{node_str}")
 
     result = {
         "dates":    np.concatenate(collected["dates"]),
         "da":       np.concatenate(collected["da"],       axis=0),
         "rt":       np.concatenate(collected["rt"],       axis=0),
         "calendar": np.concatenate(collected["calendar"], axis=0),
+        "node_ids": np.concatenate(collected["node_ids"], axis=0),
     }
     order = np.argsort(result["dates"])
     return {k: v[order] for k, v in result.items()}
@@ -158,7 +170,8 @@ def print_revenue_summary(
 
 
 def plot_revenue_histogram(
-    ddpm_paths: np.ndarray, real_total: float, ddim_total: float, out_dir: str
+    ddpm_paths: np.ndarray, real_total: float, ddim_total: float,
+    out_dir: str, node_tag: str = "",
 ):
     fig, ax = plt.subplots(figsize=(9, 5))
     ax.hist(ddpm_paths, bins=max(10, len(ddpm_paths) // 2),
@@ -173,9 +186,10 @@ def plot_revenue_histogram(
     ax.legend()
     ax.grid(alpha=0.3)
     plt.tight_layout()
-    plt.savefig(os.path.join(out_dir, "backtest_revenue.png"), dpi=150)
+    fname = f"backtest_revenue{node_tag}.png"
+    plt.savefig(os.path.join(out_dir, fname), dpi=150)
     plt.close()
-    print("  Saved backtest_revenue.png")
+    print(f"  Saved {fname}")
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
@@ -190,6 +204,8 @@ def main():
     parser.add_argument("--end_date",    required=True, help="YYYY-MM-DD")
     parser.add_argument("--n_samples",   type=int, default=10,
                         help="DDPM samples per day (default: 10)")
+    parser.add_argument("--pnode_id",    type=int, default=None,
+                        help="Filter backtest to a specific pnode (auto-detected for single-node runs)")
     parser.add_argument("--out_dir",     default=None,
                         help="Output dir; defaults to <checkpoint_dir>/eval/")
     parser.add_argument("--skip_battery", action="store_true",
@@ -205,9 +221,25 @@ def main():
         )
     os.makedirs(args.out_dir, exist_ok=True)
 
-    log_path = os.path.join(args.out_dir, f"backtest_{args.start_date}_{args.end_date}.txt")
+    # Resolve pnode_id before opening log so it can go in the filename.
+    pnode_id = args.pnode_id
+    sc_data = np.load(os.path.join(cfg["data_dir"], "scaler.npz"))
+    if pnode_id is None and "pnode_ids" in sc_data.files:
+        trained = sc_data["pnode_ids"].tolist()
+        if len(trained) == 1:
+            pnode_id = int(trained[0])
+
+    node_tag = f"_pnode{pnode_id}" if pnode_id is not None else ""
+
+    log_path = os.path.join(
+        args.out_dir,
+        f"backtest{node_tag}_{args.start_date}_{args.end_date}.txt",
+    )
     log_file = open(log_path, "w")
     sys.stdout = _Tee(sys.__stdout__, log_file)
+
+    if pnode_id is not None and args.pnode_id is None:
+        print(f"Auto-detected single-node model: pnode_id={pnode_id}")
 
     device = get_device()
     mean, std = load_scaler(cfg["data_dir"])
@@ -215,12 +247,14 @@ def main():
     use_calendar = cfg.get("use_calendar", False)
     N = args.n_samples
 
-    print(f"Backtest: {args.start_date} → {args.end_date}")
+    print(f"Backtest: {args.start_date} → {args.end_date}"
+          + (f"  pnode={pnode_id}" if pnode_id is not None else "  (all nodes)"))
     print(f"Checkpoint: {args.checkpoint}")
     print(f"Device: {device}  |  DDPM samples/day: {N}  |  DDIM steps: {ddim_steps}")
 
     # ── Load data ─────────────────────────────────────────────────────────────
-    data = load_date_range(cfg["data_dir"], args.start_date, args.end_date)
+    data = load_date_range(cfg["data_dir"], args.start_date, args.end_date,
+                           pnode_id=pnode_id)
     M = len(data["dates"])
     print(f"\nFound {M} days in [{args.start_date}, {args.end_date}]")
     if M == 0:
@@ -276,7 +310,7 @@ def main():
                           real_daily, ddim_daily, M, N)
 
     # ── Save ──────────────────────────────────────────────────────────────────
-    npz_path = os.path.join(args.out_dir, "backtest_revenues.npz")
+    npz_path = os.path.join(args.out_dir, f"backtest_revenues{node_tag}.npz")
     np.savez(npz_path,
              real_daily=real_daily,
              ddim_daily=ddim_daily,
@@ -285,7 +319,8 @@ def main():
     print(f"\nSaved revenues → {npz_path}")
 
     if not args.skip_battery:
-        plot_revenue_histogram(ddpm_paths, real_total, ddim_total, args.out_dir)
+        plot_revenue_histogram(ddpm_paths, real_total, ddim_total, args.out_dir,
+                               node_tag=node_tag)
 
     print(f"\nAll outputs saved to {args.out_dir}/")
 
