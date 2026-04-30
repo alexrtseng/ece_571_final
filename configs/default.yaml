@@ -32,5 +32,5 @@ patience: 40
 use_calendar: false    # set true in configs/calendar.yaml to enable
 
 # ── Output ────────────────────────────────────────────────────────────────────
-out_dir: ./runs
+out_dir: ./runs/default
 save_every: 10         # save checkpoint every N epochs

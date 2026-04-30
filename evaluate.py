@@ -11,10 +11,25 @@ Usage:
 
 import argparse
 import os
+import sys
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy import stats
 from battery import batch_revenue
+
+
+class _Tee:
+    """Write to multiple file-like objects simultaneously."""
+    def __init__(self, *files):
+        self.files = files
+
+    def write(self, s):
+        for f in self.files:
+            f.write(s)
+
+    def flush(self):
+        for f in self.files:
+            f.flush()
 
 
 # ── Stats helpers ──────────────────────────────────────────────────────────────
@@ -30,8 +45,18 @@ def hourly_vol(prices: np.ndarray) -> np.ndarray:
     return reshaped.std(axis=2).mean(axis=0)              # (24,)
 
 
+def cumulative_movement(prices: np.ndarray) -> tuple[float, float]:
+    """Mean cumulative upward and downward movement per day. prices: (N, 288)"""
+    diffs = np.diff(prices, axis=1)  # (N, 287)
+    up   = float(np.where(diffs > 0, diffs, 0).sum(axis=1).mean())
+    down = float(np.where(diffs < 0, -diffs, 0).sum(axis=1).mean())
+    return up, down
+
+
 def volatility_stats(prices: np.ndarray, label: str) -> dict:
     flat = prices.ravel()
+    rows = prices if prices.ndim == 2 else prices[None, :]
+    cum_up, cum_down = cumulative_movement(rows)
     return {
         "label": label,
         "mean": float(flat.mean()),
@@ -42,6 +67,8 @@ def volatility_stats(prices: np.ndarray, label: str) -> dict:
         "spike_100": spike_freq(flat, 100),
         "spike_500": spike_freq(flat, 500),
         "spike_neg": float((flat < 0).mean()),
+        "cum_up": cum_up,
+        "cum_down": cum_down,
     }
 
 
@@ -57,6 +84,8 @@ def print_stats(stats_dict: dict):
     print(f"  Spike >$100:   {stats_dict['spike_100']:>10.3%}")
     print(f"  Spike >$500:   {stats_dict['spike_500']:>10.3%}")
     print(f"  Negative:      {stats_dict['spike_neg']:>10.3%}")
+    print(f"  Cum up/day:    {stats_dict['cum_up']:>10.2f} $/MWh")
+    print(f"  Cum down/day:  {stats_dict['cum_down']:>10.2f} $/MWh")
 
 
 # ── Plots ──────────────────────────────────────────────────────────────────────
@@ -178,7 +207,6 @@ def battery_eval(real_rt, ddpm_samples, ddim_samples, out_dir):
     N_gen is a multiple of N_real, otherwise treat all samples independently.
     """
     print("\nRunning battery arbitrage optimization...")
-
     real_rev  = batch_revenue(real_rt,      desc="real RT   ")
     ddpm_rev  = batch_revenue(ddpm_samples, desc="DDPM samples")
     ddim_rev  = batch_revenue(ddim_samples, desc="DDIM samples")
@@ -285,7 +313,8 @@ def main():
     parser.add_argument("--ddim_samples", required=True)
     parser.add_argument("--real_npz", default=None,
                         help="Path to test.npz; if omitted, uses real_rt from samples file")
-    parser.add_argument("--out_dir", default="runs/eval")
+    parser.add_argument("--out_dir", default=None,
+                        help="Output directory; defaults to <run_dir>/eval/ next to the samples file")
     parser.add_argument("--skip_battery", action="store_true",
                         help="Skip battery LP (faster; use if Gurobi unavailable)")
     args = parser.parse_args()
@@ -294,7 +323,15 @@ def main():
     with open(args.config) as f:
         cfg = yaml.safe_load(f)
 
+    if args.out_dir is None:
+        run_dir = os.path.dirname(os.path.abspath(args.ddpm_samples))
+        args.out_dir = os.path.join(run_dir, "eval")
+
     os.makedirs(args.out_dir, exist_ok=True)
+
+    log_path = os.path.join(args.out_dir, "stats.txt")
+    log_file = open(log_path, "w")
+    sys.stdout = _Tee(sys.__stdout__, log_file)
 
     # Load samples
     ddpm = np.load(args.ddpm_samples)
@@ -342,6 +379,10 @@ def main():
         battery_eval(real_rt, ddpm_samples, ddim_samples, args.out_dir)
 
     print(f"\nAll outputs saved to {args.out_dir}/")
+
+    sys.stdout = sys.__stdout__
+    log_file.close()
+    print(f"Stats log saved to {log_path}")
 
 
 if __name__ == "__main__":
