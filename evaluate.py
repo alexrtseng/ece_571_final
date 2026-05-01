@@ -12,6 +12,7 @@ Usage:
 import argparse
 import os
 import sys
+import time
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy import stats
@@ -332,6 +333,7 @@ def main():
     log_path = os.path.join(args.out_dir, "stats.txt")
     log_file = open(log_path, "w")
     sys.stdout = _Tee(sys.__stdout__, log_file)
+    eval_start = time.perf_counter()
 
     # Load samples
     ddpm = np.load(args.ddpm_samples)
@@ -356,6 +358,7 @@ def main():
     print(f"DDIM samples: {ddim_samples.shape}")
 
     # Price stats
+    t0 = time.perf_counter()
     for arr, label in [
         (real_rt, "Real RT"),
         (ddpm_samples, "DDPM Generated"),
@@ -366,17 +369,33 @@ def main():
     w_ddpm = wasserstein(real_rt, ddpm_samples)
     w_ddim = wasserstein(real_rt, ddim_samples)
     print(f"\nWasserstein distance  DDPM: {w_ddpm:.4f}  DDIM: {w_ddim:.4f}")
+    stats_time = time.perf_counter() - t0
 
     # Price plots
+    t0 = time.perf_counter()
     print("\nGenerating price plots...")
     plot_traces(real_rt, ddpm_samples, ddim_samples, args.out_dir)
     plot_distribution(real_rt, ddpm_samples, ddim_samples, args.out_dir)
     plot_hourly_vol(real_rt, ddpm_samples, ddim_samples, args.out_dir)
     plot_acf(real_rt, ddpm_samples, ddim_samples, args.out_dir)
+    plots_time = time.perf_counter() - t0
 
     # Battery evaluation
+    battery_time = 0.0
     if not args.skip_battery:
+        t0 = time.perf_counter()
         battery_eval(real_rt, ddpm_samples, ddim_samples, args.out_dir)
+        battery_time = time.perf_counter() - t0
+
+    total_eval_time = time.perf_counter() - eval_start
+    print(f"\n{'─'*60}")
+    print(f"  Evaluation Timing")
+    print(f"{'─'*60}")
+    print(f"  Price statistics:  {stats_time:>8.1f} s")
+    print(f"  Plot generation:   {plots_time:>8.1f} s")
+    if not args.skip_battery:
+        print(f"  Battery LP:        {battery_time:>8.1f} s")
+    print(f"  Total eval time:   {total_eval_time:>8.1f} s")
 
     print(f"\nAll outputs saved to {args.out_dir}/")
 

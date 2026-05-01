@@ -14,6 +14,7 @@ Usage:
 
 import argparse
 import os
+import time
 import numpy as np
 import torch
 import yaml
@@ -120,6 +121,7 @@ def main():
 
         print(f"Sampling {args.n_samples} trace(s) for each of {n_days} test days "
               f"with {sampler_name.upper()}...")
+        sample_start = time.perf_counter()
 
         for i in range(n_days):
             da_288 = np.repeat(da_arr[i], 12).astype(np.float32)
@@ -141,9 +143,26 @@ def main():
 
         out_path = args.out or os.path.join(cfg["out_dir"], f"samples_{sampler_name}.npz")
         os.makedirs(os.path.dirname(out_path) if os.path.dirname(out_path) else ".", exist_ok=True)
+        sample_elapsed = time.perf_counter() - sample_start
+        total_traces = n_days * args.n_samples
+        print(f"Sampling time: {sample_elapsed:.1f}s  "
+              f"({sample_elapsed / total_traces * 1000:.1f} ms/trace, "
+              f"{sample_elapsed / n_days:.2f} s/day)")
+
         np.savez(out_path, samples=samples_all, real_rt=real_all,
                  dates=dates_arr, node_ids=nid_arr)
         print(f"Saved {samples_all.shape} samples ({n_days} days × {args.n_samples}) to {out_path}")
+
+        timing_path = out_path.replace(".npz", "_timing.txt")
+        with open(timing_path, "w") as f:
+            f.write(f"sampler: {sampler_name}\n")
+            f.write(f"n_days: {n_days}\n")
+            f.write(f"n_samples_per_day: {args.n_samples}\n")
+            f.write(f"total_traces: {total_traces}\n")
+            f.write(f"sampling_time_s: {sample_elapsed:.2f}\n")
+            f.write(f"ms_per_trace: {sample_elapsed / total_traces * 1000:.2f}\n")
+            f.write(f"s_per_day: {sample_elapsed / n_days:.3f}\n")
+        print(f"Timing saved to {timing_path}")
         return
 
     # ── Single-day mode ────────────────────────────────────────────────────────
@@ -178,12 +197,17 @@ def main():
     # Sample
     sampler_name = "ddim" if args.ddim else "ddpm"
     print(f"Sampling {args.n_samples} traces with {sampler_name.upper()}...")
+    sample_start = time.perf_counter()
 
     if args.ddim:
         S = args.ddim_steps or cfg.get("ddim_steps", 50)
         samples_norm = sample_ddim(model, schedule, da_cond, n_samples=args.n_samples, S=S, cal=cal_tensor)
     else:
         samples_norm = sample_ddpm(model, schedule, da_cond, n_samples=args.n_samples, cal=cal_tensor)
+
+    sample_elapsed = time.perf_counter() - sample_start
+    print(f"Sampling time: {sample_elapsed:.1f}s  "
+          f"({sample_elapsed / args.n_samples * 1000:.1f} ms/trace)")
 
     samples_norm = samples_norm.squeeze(1).cpu().numpy()  # (n_samples, 288)
     samples = denormalize(samples_norm, scaler_mean, scaler_std)
@@ -194,6 +218,14 @@ def main():
     print(f"Saved {samples.shape} samples to {out_path}")
     print(f"  Sample mean: {samples.mean():.2f}  std: {samples.std():.2f}  "
           f"max: {samples.max():.2f}  min: {samples.min():.2f}")
+
+    timing_path = out_path.replace(".npz", "_timing.txt")
+    with open(timing_path, "w") as f:
+        f.write(f"sampler: {sampler_name}\n")
+        f.write(f"n_samples: {args.n_samples}\n")
+        f.write(f"sampling_time_s: {sample_elapsed:.2f}\n")
+        f.write(f"ms_per_trace: {sample_elapsed / args.n_samples * 1000:.2f}\n")
+    print(f"Timing saved to {timing_path}")
 
 
 if __name__ == "__main__":

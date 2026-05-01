@@ -8,6 +8,7 @@ Usage:
 import argparse
 import os
 import math
+import time
 import yaml
 import torch
 from torch.cuda.amp import GradScaler, autocast
@@ -75,8 +76,11 @@ def main():
     global_step = 0
     best_val_loss = float("inf")
     epochs_without_improvement = 0
+    epoch_times = []
+    train_start = time.perf_counter()
 
     for epoch in range(1, cfg["epochs"] + 1):
+        epoch_start = time.perf_counter()
         # ── Train ──────────────────────────────────────────────────────────
         model.train()
         train_loss = 0.0
@@ -116,7 +120,9 @@ def main():
                     val_loss += trainer.loss(rt, da_cond, cal=cal).item()
         val_loss /= len(loaders["val"])
 
-        print(f"Epoch {epoch:4d} | train={train_loss:.4f} | val={val_loss:.4f} | lr={lr:.2e}")
+        epoch_elapsed = time.perf_counter() - epoch_start
+        epoch_times.append(epoch_elapsed)
+        print(f"Epoch {epoch:4d} | train={train_loss:.4f} | val={val_loss:.4f} | lr={lr:.2e} | {epoch_elapsed:.1f}s")
 
         # ── Checkpoints ───────────────────────────────────────────────────
         if epoch % cfg.get("save_every", 10) == 0:
@@ -135,7 +141,22 @@ def main():
             print(f"Early stopping: no improvement for {patience} epochs.")
             break
 
+    total_elapsed = time.perf_counter() - train_start
+    n_epochs_run = len(epoch_times)
+    avg_epoch = sum(epoch_times) / n_epochs_run if n_epochs_run else 0.0
     print(f"Training complete. Best val loss: {best_val_loss:.4f}")
+    print(f"Total training time: {total_elapsed:.1f}s  |  "
+          f"Avg per epoch: {avg_epoch:.1f}s  |  Epochs run: {n_epochs_run}")
+
+    stats_path = os.path.join(out_dir, "training_stats.txt")
+    with open(stats_path, "w") as f:
+        f.write(f"best_val_loss: {best_val_loss:.6f}\n")
+        f.write(f"epochs_run: {n_epochs_run}\n")
+        f.write(f"total_training_time_s: {total_elapsed:.2f}\n")
+        f.write(f"avg_epoch_time_s: {avg_epoch:.2f}\n")
+        for i, t in enumerate(epoch_times, 1):
+            f.write(f"  epoch_{i:04d}_time_s: {t:.2f}\n")
+    print(f"Training stats saved to {stats_path}")
 
 
 if __name__ == "__main__":
