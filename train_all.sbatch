@@ -63,6 +63,7 @@ RUNNER_ARGS=(
     "--n_samples"      "$N_SAMPLES"
     "--backtest_start" "$BACKTEST_START"
     "--backtest_end"   "$BACKTEST_END"
+    "--skip_preprocess"
 )
 
 if [ "$CONFIGS" != "all" ]; then
