@@ -23,21 +23,14 @@ echo "======================================================"
 # ── Modules ───────────────────────────────────────────────────────────────────
 module purge
 
-module load proxy/default || { echo "WARNING: proxy/default not available"; }
-
-# Try common Gurobi versions on Della; update if the cluster has a newer one.
-module load gurobi/11.0.1 2>/dev/null || \
-module load gurobi/10.0.3 2>/dev/null || \
-module load gurobi/9.0.1  2>/dev/null || \
-    echo "WARNING: No compatible Gurobi module found. Battery eval will fail."
+module load proxy/default || { echo "proxy/default load failed"; module avail |& grep -i proxy || true; exit 1; }
+module load gurobi/9.0.1 || { echo "gurobi load failed"; module avail |& grep -i gurobi || true; exit 1; }
 
 # ── Python environment ────────────────────────────────────────────────────────
-# Set up on Della once with:
-#   module load python/3.11
-#   python -m venv .venv
-#   source .venv/bin/activate
-#   pip install -r requirements.txt
-source .venv/bin/activate
+: "${MAMBA_ROOT_PREFIX:=../.mamba}"
+export MAMBA_ROOT_PREFIX
+eval "$(../tools/bin/micromamba shell hook -s bash)"
+micromamba activate ../.venv
 
 # ── Thread throttles ──────────────────────────────────────────────────────────
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-2}
