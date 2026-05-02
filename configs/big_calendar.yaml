@@ -51,7 +51,7 @@ lr: 1.0e-4
 lr_warmup_steps: 500
 grad_clip: 1.0
 mixed_precision: true
-patience: 20
+patience: 40
 
 # ── Calendar conditioning ──────────────────────────────────────────────────────
 use_calendar: true
